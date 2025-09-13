@@ -3,6 +3,7 @@ import numpy as np
 from datetime import date, timedelta, datetime
 import random
 import os
+import config
 
 def generate_synthetic_data():
     """
@@ -10,7 +11,7 @@ def generate_synthetic_data():
     increases the probability of maintenance issues and certificate expirations
     across the entire fleet to ensure all features are robustly testable.
     """
-    output_filename = 'train_schedule_data.csv'
+    output_filename = config.TRAIN_DATA_PATH
     
     if os.path.exists(output_filename):
         print(f"Data file '{output_filename}' already exists. Skipping generation.")
@@ -20,23 +21,20 @@ def generate_synthetic_data():
     print(f"Generating realistic fleet data with built-in conflicts...")
     
     today = date.today()
-    start_date = today - timedelta(days=180)
-    end_date = today + timedelta(days=185)
+    start_date = today - timedelta(days=config.START_DATE_OFFSET_DAYS)
+    end_date = today + timedelta(days=config.END_DATE_OFFSET_DAYS)
     
-    num_trains = 25
+    num_trains = config.NUM_TRAINS
     train_ids = range(1, num_trains + 1)
     
     data = []
     
-    # --- ENHANCED REALISM ---
-    # The initial certificate days are now more varied, with a lower minimum.
-    # This ensures some trains will always be approaching their expiry date.
     train_attributes = {
         train_id: {
             'mileage_km': random.randint(50000, 200000),
-            'rolling_stock_cert_days_remaining': random.randint(5, 90), # Lower min
-            'signalling_cert_days_remaining': random.randint(5, 180), # Lower min
-            'telecom_cert_days_remaining': random.randint(5, 365), # Lower min
+            'rolling_stock_cert_days_remaining': random.randint(5, 90),
+            'signalling_cert_days_remaining': random.randint(5, 180),
+            'telecom_cert_days_remaining': random.randint(5, 365),
             'branding_priority': random.choice(['High', 'Medium', 'Low']),
             'days_since_last_clean': random.randint(0, 30)
         }
@@ -57,13 +55,11 @@ def generate_synthetic_data():
             if attrs['signalling_cert_days_remaining'] <= 0: attrs['signalling_cert_days_remaining'] = 180
             if attrs['telecom_cert_days_remaining'] <= 0: attrs['telecom_cert_days_remaining'] = 365
             
-            # --- ENHANCED REALISM ---
-            # Increased probability of open job cards from 15% to 25%
-            job_card_status = 'Closed' if random.random() > 0.25 else 'Open'
+            job_card_status = 'Closed' if random.random() > config.JOB_CARD_OPEN_PROB else 'Open'
             hours_run_today = 0.0
 
             cleaning_is_due = attrs['days_since_last_clean'] > 30
-            cleaning_status = 'Scheduled' if cleaning_is_due and random.random() > 0.3 else 'Clean'
+            cleaning_status = 'Scheduled' if cleaning_is_due and random.random() > config.CLEANING_SCHEDULED_PROB else 'Clean'
 
             all_certs_valid = (
                 attrs['rolling_stock_cert_days_remaining'] > 0 and
@@ -77,7 +73,7 @@ def generate_synthetic_data():
                 induction_decision = 'Standby'
                 attrs['days_since_last_clean'] = 0 
             else:
-                induction_decision = 'Inducted' if random.random() > 0.5 else 'Standby'
+                induction_decision = 'Inducted' if random.random() > config.INDUCTED_PROB else 'Standby'
 
             if induction_decision == 'Inducted':
                 attrs['mileage_km'] += random.randint(300, 600)
@@ -114,6 +110,3 @@ def generate_synthetic_data():
 
 if __name__ == '__main__':
     generate_synthetic_data()
-
-    
-

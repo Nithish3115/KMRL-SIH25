@@ -1,21 +1,19 @@
 {
     "depot_layout": {
-      "Track 1": { "accessibility_score": 10, "has_maintenance_access": true, "description": "Prime turn-out and IBL access", "status": "Available" },
-      "Track 2": { "accessibility_score": 9, "has_maintenance_access": true, "description": "Excellent turn-out and IBL access", "status": "Available" },
-      "Track 3": { "accessibility_score": 8, "has_maintenance_access": true, "description": "Good IBL access", "status": "Available" },
-      "Track 4": { "accessibility_score": 7, "has_maintenance_access": false, "description": "Good turn-out, no IBL access", "status": "Available" },
-      "Track 5": { "accessibility_score": 7, "has_maintenance_access": false, "description": "Good turn-out, no IBL access", "status": "Available" },
-      "Track 6": { "accessibility_score": 6, "has_maintenance_access": false, "description": "Average accessibility", "status": "Available" },
-      "Track 7": { "accessibility_score": 6, "has_maintenance_access": false, "description": "Average accessibility", "status": "Blocked" },
-      "Track 8": { "accessibility_score": 5, "has_maintenance_access": false, "description": "Average accessibility, slightly blocked", "status": "Available" },
-      "Track 9": { "accessibility_score": 5, "has_maintenance_access": false, "description": "Average accessibility, slightly blocked", "status": "Available" },
-      "Track 10": { "accessibility_score": 4, "has_maintenance_access": false, "description": "Below average, requires shunting", "status": "Under Maintenance" },
-      "Track 11": { "accessibility_score": 4, "has_maintenance_access": false, "description": "Below average, requires shunting", "status": "Available" },
-      "Track 12": { "accessibility_score": 3, "has_maintenance_access": false, "description": "Blocked, requires multiple shunts", "status": "Available" },
-      "Track 13": { "accessibility_score": 3, "has_maintenance_access": false, "description": "Blocked, requires multiple shunts", "status": "Available" },
-      "Track 14": { "accessibility_score": 2, "has_maintenance_access": false, "description": "Deep stabling, difficult access", "status": "Available" },
-      "Track 15": { "accessibility_score": 1, "has_maintenance_access": false, "description": "Long-term stabling, most difficult access", "status": "Available" }
+      "Track 1": { "position": 1, "accessibility_score": 10, "has_maintenance_access": true, "description": "Prime turn-out and IBL access", "status": "Available" },
+      "Track 2": { "position": 2, "accessibility_score": 9, "has_maintenance_access": true, "description": "Excellent turn-out and IBL access", "status": "Available" },
+      "Track 3": { "position": 3, "accessibility_score": 8, "has_maintenance_access": true, "description": "Good IBL access", "status": "Available" },
+      "Track 4": { "position": 4, "accessibility_score": 7, "has_maintenance_access": false, "description": "Good turn-out, no IBL access", "status": "Available" },
+      "Track 5": { "position": 5, "accessibility_score": 7, "has_maintenance_access": false, "description": "Good turn-out, no IBL access", "status": "Available" },
+      "Track 6": { "position": 6, "accessibility_score": 6, "has_maintenance_access": false, "description": "Average accessibility", "status": "Available" },
+      "Track 7": { "position": 7, "accessibility_score": 6, "has_maintenance_access": false, "description": "Average accessibility", "status": "Blocked" },
+      "Track 8": { "position": 8, "accessibility_score": 5, "has_maintenance_access": false, "description": "Average accessibility, slightly blocked", "status": "Available" },
+      "Track 9": { "position": 9, "accessibility_score": 5, "has_maintenance_access": false, "description": "Average accessibility, slightly blocked", "status": "Available" },
+      "Track 10": { "position": 10, "accessibility_score": 4, "has_maintenance_access": false, "description": "Below average, requires shunting", "status": "Under Maintenance" },
+      "Track 11": { "position": 11, "accessibility_score": 4, "has_maintenance_access": false, "description": "Below average, requires shunting", "status": "Available" },
+      "Track 12": { "position": 12, "accessibility_score": 3, "has_maintenance_access": false, "description": "Blocked, requires multiple shunts", "status": "Available" },
+      "Track 13": { "position": 13, "accessibility_score": 3, "has_maintenance_access": false, "description": "Blocked, requires multiple shunts", "status": "Available" },
+      "Track 14": { "position": 14, "accessibility_score": 2, "has_maintenance_access": false, "description": "Deep stabling, difficult access", "status": "Available" },
+      "Track 15": { "position": 15, "accessibility_score": 1, "has_maintenance_access": false, "description": "Long-term stabling, most difficult access", "status": "Available" }
     }
   }
-  
-  

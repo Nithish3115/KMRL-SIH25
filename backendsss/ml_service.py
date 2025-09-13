@@ -5,6 +5,8 @@ from datetime import datetime
 from sklearn.metrics import classification_report
 import calendar
 import math
+import config
+from utils import get_settings
 
 class TrainInductionModel:
     """
@@ -12,11 +14,12 @@ class TrainInductionModel:
     the final, corrected "What-If" engine that performs a true simulation on any
     provided plan and generates a high-level comparison summary.
     """
-    def __init__(self, data_service, model_path='model.xgb'):
+    def __init__(self, data_service, model_path=config.MODEL_PATH):
         self.data_service = data_service
         self.model_path = model_path
         self.model = self._load_model()
-        self.label_encoders = joblib.load('label_encoders.pkl')
+        self.label_encoders = joblib.load(config.LABEL_ENCODERS_PATH)
+        self.settings = get_settings()
 
     def _load_model(self):
         """Loads the trained XGBoost model from the specified file path."""
@@ -34,7 +37,7 @@ class TrainInductionModel:
         print("Training XGBoost model...")
         self.model = xgb.XGBClassifier(
             objective='multi:softmax', num_class=3, use_label_encoder=False, 
-            eval_metric='mlogloss', n_estimators=100, learning_rate=0.1, max_depth=5
+            eval_metric='mlogloss', n_estimators=100, learning_rate=0.05, max_depth=3
         )
         self.model.fit(X_train, y_train)
         self.model.save_model(self.model_path)
@@ -64,29 +67,45 @@ class TrainInductionModel:
             train_id = int(row['train_id'])
             predicted_decision = decision_encoder.inverse_transform([probabilities[index].argmax()])[0]
 
+            alerts = []
             score = 100.0
-            if row['certs_critical']: score -= 30
-            if row['maintenance_needed']: score -= 50
-            if row['cleaning_status'] == 'Scheduled': score -= 40
+
+            # Certificate expiry alerts and penalties
+            if row['certs_critical']:
+                score -= float(self.settings.get('CERTS_CRITICAL_PENALTY', config.CERTS_CRITICAL_PENALTY))
+                for cert_type in ['rolling_stock', 'signalling', 'telecom']:
+                    if row[f'{cert_type}_cert_days_remaining'] <= 7:
+                        alerts.append(f"ALERT: {cert_type.replace('_', ' ').title()} certificate expires in {row[f'{cert_type}_cert_days_remaining']} days.")
+
+            if row['maintenance_needed']: score -= float(self.settings.get('MAINTENANCE_NEEDED_PENALTY', config.MAINTENANCE_NEEDED_PENALTY))
+            if row['cleaning_status'] == 'Scheduled': score -= float(self.settings.get('CLEANING_SCHEDULED_PENALTY', config.CLEANING_SCHEDULED_PENALTY))
             
+            # Mileage deviation alerts and penalties
             mileage_deviation = row['mileage_km'] - avg_mileage
-            if mileage_deviation > 20000:
-                score -= (mileage_deviation / 2000)
-            
+            if abs(mileage_deviation) > 20000:
+                score -= (abs(mileage_deviation) / float(self.settings.get('MILEAGE_DEVIATION_PENALTY_FACTOR', config.MILEAGE_DEVIATION_PENALTY_FACTOR)))
+                if mileage_deviation > 20000:
+                    alerts.append(f"NOTICE: Mileage is {int(mileage_deviation)} km above fleet average.")
+                else:
+                    alerts.append(f"NOTICE: Mileage is {abs(int(mileage_deviation))} km below fleet average.")
+
             track_name = row['stabling_location']
             track_props = self.data_service.get_track_properties(track_name)
             if not row['maintenance_needed'] and track_props['accessibility_score'] > 7:
-                score += track_props['accessibility_score']
+                score += track_props['accessibility_score'] * float(self.settings.get('ACCESSIBILITY_SCORE_BONUS', config.ACCESSIBILITY_SCORE_BONUS))
             if row['maintenance_needed'] and not track_props['has_maintenance_access']:
-                score -= 25
+                score -= float(self.settings.get('MAINTENANCE_ACCESS_PENALTY', config.MAINTENANCE_ACCESS_PENALTY))
             
-            alert_message, branding_details, branding_bonus = self._get_branding_and_alert_info(row, target_date, train_id)
+            branding_details, branding_bonus, branding_alert = self._get_branding_and_alert_info(row, target_date, train_id)
+            if branding_alert:
+                alerts.append(branding_alert)
             score += branding_bonus
             
             rec = row.to_dict()
             rec.update({
                 'predicted_decision': predicted_decision, 'recommendation_score': float(score),
-                'alerts': alert_message, 'branding_details': branding_details,
+                'alerts': alerts if alerts else ["No alerts."],
+                'branding_details': branding_details,
                 'train_id': int(train_id), 'mileage_km': int(rec['mileage_km']),
                 'date': rec['date'].strftime('%Y-%m-%d')
             })
@@ -97,12 +116,12 @@ class TrainInductionModel:
 
     def _get_branding_and_alert_info(self, row, target_date, train_id):
         """Helper function to calculate branding details and score bonuses."""
-        alert_message = "No alerts."
+        alert_message = None
         branding_details = {"has_contract": False}
         branding_bonus = 0
         contract = self.data_service.get_contract_for_train(train_id)
         if contract:
-            if row['branding_priority'] == 'High': branding_bonus += 15
+            if row['branding_priority'] == 'High': branding_bonus += float(self.settings.get('BRANDING_HIGH_PRIORITY_BONUS', config.BRANDING_HIGH_PRIORITY_BONUS))
             mtd_hours = self.data_service.get_mtd_hours_for_train(train_id, target_date)
             quota = contract['monthly_quota_hours']
             progress_percent = (mtd_hours / quota) * 100 if quota > 0 else 100
@@ -115,10 +134,10 @@ class TrainInductionModel:
             if projected_penalty > 1000:
                 penalty_str = f"₹{int(projected_penalty):,}"
                 alert_message = f"ALERT: Branding quota at risk! Projected penalty: {penalty_str}. Prioritize for induction."
-                branding_bonus += 75
-        return alert_message, branding_details, branding_bonus
+                branding_bonus += float(self.settings.get('BRANDING_PENALTY_BONUS', config.BRANDING_PENALTY_BONUS))
+        return branding_details, branding_bonus, alert_message
 
-    def _calculate_plan_kpis(self, schedule: list, all_contracts: dict) -> dict:
+    def calculate_plan_kpis(self, schedule: list, all_contracts: dict) -> dict:
         """Definitive KPI engine for calculating high-level plan scores."""
         total_trains = len(schedule)
         if total_trains == 0: return {'readiness_score': 0, 'financial_score': 100, 'balance_score': 0}
@@ -147,7 +166,10 @@ class TrainInductionModel:
         return {'readiness_score': round(readiness_score, 1), 'financial_score': round(financial_score, 1), 'balance_score': round(balance_score, 1)}
 
     def optimize_recommendations(self, recommendations: list, constraints: dict):
-        """Applies simple, hard constraints to a plan."""
+        """
+        Applies simple, hard constraints to a plan. 
+        NOTE: This is a simplistic approach. For true optimization, use the genetic algorithm endpoint.
+        """
         required_inducted = constraints.get('required_inducted', 0)
         required_maintenance = constraints.get('required_maintenance', 0)
         for i in range(min(required_inducted, len(recommendations))):
@@ -163,17 +185,46 @@ class TrainInductionModel:
         """The definitive, status-aware Shunting Planner engine."""
         moves, warnings = [], []
         maintenance_tracks = {t: p for t, p in self.data_service.depot_layout.items() if p['has_maintenance_access'] and p.get('status', 'Available') == 'Available'}
-        occupied_tracks = {train['stabling_location'] for train in final_schedule}
+        occupied_tracks = {train['stabling_location']: train for train in final_schedule}
+
         for train in final_schedule:
             decision = train.get('final_decision', train.get('predicted_decision'))
             track_props = self.data_service.get_track_properties(train['stabling_location'])
+
             if decision == 'Maintenance' and not track_props['has_maintenance_access']:
-                available_track = next((t for t in maintenance_tracks if t not in occupied_tracks), None)
-                if available_track:
-                    moves.append(f"Move Train {train['train_id']} from {train['stabling_location']} to {available_track} for IBL access.")
-                    occupied_tracks.add(available_track)
+                # Find the nearest available maintenance track
+                min_dist = float('inf')
+                best_track = None
+                current_pos = track_props.get('position', -1)
+
+                if current_pos != -1:
+                    for m_track, m_props in maintenance_tracks.items():
+                        if m_track not in occupied_tracks:
+                            dist = abs(m_props.get('position', -1) - current_pos)
+                            if dist < min_dist:
+                                min_dist = dist
+                                best_track = m_track
+                
+                if best_track:
+                    moves.append(f"Move Train {train['train_id']} from {train['stabling_location']} to {best_track} for IBL access.")
+                    # To prevent double booking, mark the target track as occupied for this planning session
+                    occupied_tracks[best_track] = train
                 else:
                     warnings.append(f"CRITICAL: Train {train['train_id']} requires maintenance but ALL available IBL tracks are occupied or unavailable.")
+
+        # Basic check for blocking trains (assuming linear depot)
+        sorted_occupied_tracks = sorted(occupied_tracks.items(), key=lambda item: self.data_service.get_track_properties(item[0]).get('position', 0))
+        
+        for i in range(len(sorted_occupied_tracks) - 1):
+            current_track_name, current_train = sorted_occupied_tracks[i]
+            next_track_name, next_train = sorted_occupied_tracks[i+1]
+            
+            # If a train needs to move out and is blocked by a train on a lower-numbered track
+            if (current_train.get('final_decision') == 'Inducted' and 
+                self.data_service.get_track_properties(current_track_name).get('accessibility_score', 0) < 5 and
+                next_train.get('final_decision') != 'Inducted') :
+                warnings.append(f"POTENTIAL BLOCK: Train {next_train['train_id']} on {next_track_name} may block Train {current_train['train_id']} on {current_track_name}. Manual check advised.")
+
         plan_summary = f"Generated {len(moves)} shunting move(s) with {len(warnings)} warning(s)." if moves or warnings else "Depot layout is already optimized. No shunting required."
         return {"plan_summary": plan_summary, "required_moves": moves, "warnings": warnings}
 
@@ -198,8 +249,8 @@ class TrainInductionModel:
             if train['train_id'] == train_id_to_change:
                 train['final_decision'] = action_word
         
-        original_scores = self._calculate_plan_kpis(original_plan, self.data_service.branding_contracts)
-        updated_scores = self._calculate_plan_kpis(updated_plan, self.data_service.branding_contracts)
+        original_scores = self.calculate_plan_kpis(original_plan, self.data_service.branding_contracts)
+        updated_scores = self.calculate_plan_kpis(updated_plan, self.data_service.branding_contracts)
         
         summary = {}
         for key in original_scores:
@@ -213,9 +264,9 @@ class TrainInductionModel:
                 "title": f"Plan Comparison for changing Train {train_id_to_change} to '{action_word}'",
                 "overall_plan_scores": {
                     "original_plan": original_scores,
-                    "your_hypotahiddentical_plan": updated_scores
+                    "your_hypothetical_plan": updated_scores
                 },
-                "comparison_summary": summary
+                "comparison_summary": summary,
+                "updated_plan": updated_plan
             }
         }
-

@@ -1,6 +1,7 @@
 from data_service import DataService
 from ml_service import TrainInductionModel
 import os
+import config
 
 def initial_setup():
     """
@@ -13,8 +14,8 @@ def initial_setup():
     print("--- Starting Initial System Setup ---")
     
     # Prerequisite check: Ensure the synthetic data has been generated first.
-    if not os.path.exists('train_schedule_data.csv'):
-        print("\nERROR: Data file 'train_schedule_data.csv' not found.")
+    if not os.path.exists(config.TRAIN_DATA_PATH):
+        print(f"\nERROR: Data file '{config.TRAIN_DATA_PATH}' not found.")
         print("Please run 'python synthetic_data_generator.py' first to generate it.")
         return
         
@@ -31,9 +32,8 @@ def initial_setup():
     ml_model.train(X_train, y_train, X_test, y_test, data_service)
     
     print("\n--- Initial System Setup Finished Successfully ---")
-    print("All necessary files (model.xgb, label_encoders.pkl) have been created.")
+    print(f"All necessary files ({config.MODEL_PATH}, {config.LABEL_ENCODERS_PATH}) have been created.")
     print("You can now start the API server by running 'python app.py'")
 
 if __name__ == '__main__':
     initial_setup()
-

@@ -1,6 +1,7 @@
 import pandas as pd
 from data_service import DataService
 from ml_service import TrainInductionModel
+import config
 
 def run_retraining_pipeline():
     """
@@ -50,7 +51,7 @@ def run_retraining_pipeline():
 
     # Initialize a new model instance to train
     # Save the new model over the old one
-    new_model = TrainInductionModel(data_service=data_service, model_path='model.xgb')
+    new_model = TrainInductionModel(data_service=data_service, model_path=config.MODEL_PATH)
     new_model.train(X_train, y_train, X_test, y_test, data_service)
 
     print("--- Model Retraining Pipeline Finished Successfully ---")
