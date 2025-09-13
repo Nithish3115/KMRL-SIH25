@@ -1,4 +1,5 @@
 import pandas as pd
+from collections import defaultdict
 import xgboost as xgb
 import joblib
 from datetime import datetime
@@ -37,7 +38,7 @@ class TrainInductionModel:
         print("Training XGBoost model...")
         self.model = xgb.XGBClassifier(
             objective='multi:softmax', num_class=3, use_label_encoder=False, 
-            eval_metric='mlogloss', n_estimators=100, learning_rate=0.05, max_depth=3
+            eval_metric='mlogloss', n_estimators=200, learning_rate=0.2, max_depth=5
         )
         self.model.fit(X_train, y_train)
         self.model.save_model(self.model_path)
@@ -77,7 +78,10 @@ class TrainInductionModel:
                     if row[f'{cert_type}_cert_days_remaining'] <= 7:
                         alerts.append(f"ALERT: {cert_type.replace('_', ' ').title()} certificate expires in {row[f'{cert_type}_cert_days_remaining']} days.")
 
-            if row['maintenance_needed']: score -= float(self.settings.get('MAINTENANCE_NEEDED_PENALTY', config.MAINTENANCE_NEEDED_PENALTY))
+            # Infer maintenance need from the model's own prediction
+            maintenance_is_predicted = (predicted_decision == 'Maintenance')
+
+            if maintenance_is_predicted: score -= float(self.settings.get('MAINTENANCE_NEEDED_PENALTY', config.MAINTENANCE_NEEDED_PENALTY))
             if row['cleaning_status'] == 'Scheduled': score -= float(self.settings.get('CLEANING_SCHEDULED_PENALTY', config.CLEANING_SCHEDULED_PENALTY))
             
             # Mileage deviation alerts and penalties
@@ -91,9 +95,9 @@ class TrainInductionModel:
 
             track_name = row['stabling_location']
             track_props = self.data_service.get_track_properties(track_name)
-            if not row['maintenance_needed'] and track_props['accessibility_score'] > 7:
+            if not maintenance_is_predicted and track_props['accessibility_score'] > 7:
                 score += track_props['accessibility_score'] * float(self.settings.get('ACCESSIBILITY_SCORE_BONUS', config.ACCESSIBILITY_SCORE_BONUS))
-            if row['maintenance_needed'] and not track_props['has_maintenance_access']:
+            if maintenance_is_predicted and not track_props['has_maintenance_access']:
                 score -= float(self.settings.get('MAINTENANCE_ACCESS_PENALTY', config.MAINTENANCE_ACCESS_PENALTY))
             
             branding_details, branding_bonus, branding_alert = self._get_branding_and_alert_info(row, target_date, train_id)
@@ -185,21 +189,26 @@ class TrainInductionModel:
         """The definitive, status-aware Shunting Planner engine."""
         moves, warnings = [], []
         maintenance_tracks = {t: p for t, p in self.data_service.depot_layout.items() if p['has_maintenance_access'] and p.get('status', 'Available') == 'Available'}
-        occupied_tracks = {train['stabling_location']: train for train in final_schedule}
+        
+        # Correctly handle multiple trains potentially being on the same track in the input data
+        occupied_tracks = defaultdict(list)
+        for train in final_schedule:
+            occupied_tracks[train['stabling_location']].append(train)
 
         for train in final_schedule:
             decision = train.get('final_decision', train.get('predicted_decision'))
             track_props = self.data_service.get_track_properties(train['stabling_location'])
 
             if decision == 'Maintenance' and not track_props['has_maintenance_access']:
-                # Find the nearest available maintenance track
                 min_dist = float('inf')
                 best_track = None
                 current_pos = track_props.get('position', -1)
 
                 if current_pos != -1:
+                    # Find the best empty or soon-to-be-empty maintenance track
                     for m_track, m_props in maintenance_tracks.items():
-                        if m_track not in occupied_tracks:
+                        # A track is considered available if it's not occupied at all
+                        if m_track not in occupied_tracks or not occupied_tracks[m_track]:
                             dist = abs(m_props.get('position', -1) - current_pos)
                             if dist < min_dist:
                                 min_dist = dist
@@ -208,17 +217,24 @@ class TrainInductionModel:
                 if best_track:
                     moves.append(f"Move Train {train['train_id']} from {train['stabling_location']} to {best_track} for IBL access.")
                     # To prevent double booking, mark the target track as occupied for this planning session
-                    occupied_tracks[best_track] = train
+                    occupied_tracks[best_track].append(train)
                 else:
-                    warnings.append(f"CRITICAL: Train {train['train_id']} requires maintenance but ALL available IBL tracks are occupied or unavailable.")
-
+                    # This warning is now more accurate, as it triggers when no truly empty maintenance tracks exist.
+                    warnings.append(f"CRITICAL: Train {train['train_id']} requires maintenance but no empty IBL tracks were found.")
+        
         # Basic check for blocking trains (assuming linear depot)
         sorted_occupied_tracks = sorted(occupied_tracks.items(), key=lambda item: self.data_service.get_track_properties(item[0]).get('position', 0))
         
         for i in range(len(sorted_occupied_tracks) - 1):
-            current_track_name, current_train = sorted_occupied_tracks[i]
-            next_track_name, next_train = sorted_occupied_tracks[i+1]
+            current_track_name, current_trains = sorted_occupied_tracks[i]
+            next_track_name, next_trains = sorted_occupied_tracks[i+1]
             
+            if not current_trains or not next_trains:
+                continue
+
+            current_train = current_trains[0]
+            next_train = next_trains[0]
+
             # If a train needs to move out and is blocked by a train on a lower-numbered track
             if (current_train.get('final_decision') == 'Inducted' and 
                 self.data_service.get_track_properties(current_track_name).get('accessibility_score', 0) < 5 and

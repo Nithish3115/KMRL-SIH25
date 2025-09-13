@@ -67,13 +67,29 @@ def generate_synthetic_data():
                 attrs['telecom_cert_days_remaining'] > 0
             )
 
-            if not all_certs_valid or job_card_status == 'Open':
-                induction_decision = 'Maintenance'
+            # --- Probabilistic Decision Making ---
+            # Base weights: [Inducted, Standby, Maintenance]
+            weights = [0.6, 0.3, 0.1]
+
+            needs_maintenance = not all_certs_valid or job_card_status == 'Open'
+
+            if needs_maintenance:
+                # Strong pull towards Maintenance
+                weights = [0.05, 0.15, 0.8]
             elif cleaning_status == 'Scheduled':
-                induction_decision = 'Standby'
-                attrs['days_since_last_clean'] = 0 
-            else:
-                induction_decision = 'Inducted' if random.random() > config.INDUCTED_PROB else 'Standby'
+                # Strong pull towards Standby
+                weights = [0.2, 0.7, 0.1]
+            
+            # Adjust weights based on other factors
+            if attrs['branding_priority'] == 'High' and not needs_maintenance:
+                weights[0] *= 1.5 # Increase chance of Inducted
+            if attrs['mileage_km'] > 250000 and not needs_maintenance:
+                weights[1] *= 1.2 # Slightly increase chance of Standby for high mileage
+
+            induction_decision = random.choices(['Inducted', 'Standby', 'Maintenance'], weights=weights, k=1)[0]
+
+            if induction_decision == 'Standby' and cleaning_status == 'Scheduled':
+                attrs['days_since_last_clean'] = 0
 
             if induction_decision == 'Inducted':
                 attrs['mileage_km'] += random.randint(300, 600)
@@ -98,7 +114,6 @@ def generate_synthetic_data():
             
             row['total_cert_days'] = row['rolling_stock_cert_days_remaining'] + row['signalling_cert_days_remaining'] + row['telecom_cert_days_remaining']
             row['certs_critical'] = int(any(c <= 7 for c in [row['rolling_stock_cert_days_remaining'], row['signalling_cert_days_remaining'], row['telecom_cert_days_remaining']]))
-            row['maintenance_needed'] = int(row['job_card_status'] == 'Open' or not all_certs_valid)
             row['weekday'] = current_date.weekday()
 
             data.append(row)

@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 import joblib
@@ -79,18 +80,26 @@ class DataService:
         if self.df is None: return None, None, None, None
         df = self.df.copy()
         categorical_cols = ['job_card_status', 'branding_priority', 'cleaning_status', 'stabling_location']
+        
         for col in categorical_cols:
             le = LabelEncoder()
-            df[col] = le.fit_transform(df[col].astype(str))
+            # Add 'unknown' to the list of classes to handle unseen values gracefully
+            all_classes = np.append(df[col].astype(str).unique(), 'unknown')
+            le.fit(all_classes)
+            df[col] = le.transform(df[col].astype(str))
             self.label_encoders[col] = le
+
         target_col = 'induction_decision'
         le = LabelEncoder()
         df[target_col] = le.fit_transform(df[target_col])
         self.label_encoders[target_col] = le
+        
         joblib.dump(self.label_encoders, config.LABEL_ENCODERS_PATH)
-        features = ['mileage_km', 'rolling_stock_cert_days_remaining', 'signalling_cert_days_remaining', 'telecom_cert_days_remaining', 'job_card_status', 'branding_priority', 'cleaning_status', 'stabling_location', 'total_cert_days', 'certs_critical', 'maintenance_needed', 'weekday']
+        
+        features = ['mileage_km', 'rolling_stock_cert_days_remaining', 'signalling_cert_days_remaining', 'telecom_cert_days_remaining', 'job_card_status', 'branding_priority', 'cleaning_status', 'stabling_location', 'total_cert_days', 'certs_critical', 'weekday']
         X = df[features]
         y = df[target_col]
+        
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
         return X_train, X_test, y_train, y_test
 
@@ -101,11 +110,11 @@ class DataService:
         for col in categorical_cols:
             le = self.label_encoders.get(col)
             if le:
-                # INFO: This strategy for handling unseen values replaces them with the first known class.
-                # This may not be optimal for all features. Consider a dedicated 'unknown' category if model performance is impacted.
-                df[col] = df[col].astype(str).apply(lambda s: s if s in le.classes_ else le.classes_[0])
+                # This robust strategy handles unseen values by mapping them to the 'unknown' category
+                # that the model was trained on, preventing prediction errors.
+                df[col] = df[col].astype(str).apply(lambda s: s if s in le.classes_ else 'unknown')
                 df[col] = le.transform(df[col])
-        features = ['mileage_km', 'rolling_stock_cert_days_remaining', 'signalling_cert_days_remaining', 'telecom_cert_days_remaining', 'job_card_status', 'branding_priority', 'cleaning_status', 'stabling_location', 'total_cert_days', 'certs_critical', 'maintenance_needed', 'weekday']
+        features = ['mileage_km', 'rolling_stock_cert_days_remaining', 'signalling_cert_days_remaining', 'telecom_cert_days_remaining', 'job_card_status', 'branding_priority', 'cleaning_status', 'stabling_location', 'total_cert_days', 'certs_critical', 'weekday']
         return df[features]
 
     def get_data_for_date(self, target_date):
