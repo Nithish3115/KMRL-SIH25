@@ -1,13 +1,17 @@
-from flask import Flask, jsonify, request, g
+
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from datetime import datetime, date
 import os
 import uuid
 import threading
-import sqlite3
 import json
 import config
 from utils import get_settings
+
+# Import database setup
+from database import SessionLocal, engine
+from database_setup import Setting, Job
 
 # Import all custom services
 from data_service import DataService
@@ -17,21 +21,6 @@ from optimizer_service import GeneticOptimizer
 # --- App Initialization ---
 app = Flask(__name__)
 CORS(app)
-
-# --- Database Configuration ---
-def get_db():
-    """Opens a new database connection if there is none yet for the current application context."""
-    if 'db' not in g:
-        g.db = sqlite3.connect(config.DB_FILE)
-        g.db.row_factory = sqlite3.Row
-    return g.db
-
-@app.teardown_appcontext
-def close_db(exception):
-    """Closes the database again at the end of the request."""
-    db = g.pop('db', None)
-    if db is not None:
-        db.close()
 
 # --- Service Initialization ---
 data_service = None
@@ -51,6 +40,11 @@ def initialize_services():
         optimizer_service = GeneticOptimizer(ml_service=ml_service)
         print("All services initialized successfully.")
 
+# --- Database Session Management ---
+@app.teardown_appcontext
+def shutdown_session(exception=None):
+    SessionLocal.remove()
+
 # --- Settings Endpoints ---
 @app.route('/api/settings', methods=['GET'])
 def get_all_settings():
@@ -62,19 +56,24 @@ def get_all_settings():
 def update_settings():
     """Updates one or more settings in the database."""
     data = request.get_json()
-    if not data: return jsonify({"error": "Invalid JSON."}), 400
+    if not data:
+        return jsonify({"error": "Invalid JSON."}), 400
 
-    db = get_db()
-    for key, value in data.items():
-        db.execute(
-            'UPDATE settings SET value = ? WHERE key = ?',
-            (str(value), key)
-        )
-    db.commit()
-    return jsonify({"message": "Settings updated successfully."})
+    db = SessionLocal()
+    try:
+        for key, value in data.items():
+            setting = db.query(Setting).filter(Setting.key == key).first()
+            if setting:
+                setting.value = str(value)
+        db.commit()
+        return jsonify({"message": "Settings updated successfully."})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
 
 # --- Asynchronous Optimizer Endpoints (with DB persistence) ---
-
 @app.route('/start-true-optimize', methods=['POST'])
 def start_true_optimize_schedule():
     """
@@ -82,52 +81,62 @@ def start_true_optimize_schedule():
     logs the job in the database, and immediately returns a job ID.
     """
     data = request.get_json()
-    if not data: return jsonify({"error": "Invalid JSON."}), 400
-    
+    if not data:
+        return jsonify({"error": "Invalid JSON."}), 400
+
     date_str = data.get('date', date.today().strftime('%Y-%m-%d'))
     required_inducted = data.get('required_inducted')
-    if not required_inducted: return jsonify({"error": "Missing 'required_inducted' constraint."}), 400
-    
-    job_id = str(uuid.uuid4())
-    db = get_db()
-    db.execute(
-        'INSERT INTO jobs (job_id, status) VALUES (?, ?)',
-        (job_id, 'running')
-    )
-    db.commit()
+    if not required_inducted:
+        return jsonify({"error": "Missing 'required_inducted' constraint."}), 400
 
-    # Pass the DB file path to the background thread
-    thread = threading.Thread(target=optimizer_service.run_optimization_background, args=(job_id, config.DB_FILE, date_str, required_inducted))
-    thread.start()
-    
-    return jsonify({"message": "Optimization job started.", "job_id": job_id}), 202
+    job_id = str(uuid.uuid4())
+    db = SessionLocal()
+    try:
+        new_job = Job(job_id=job_id, status='running')
+        db.add(new_job)
+        db.commit()
+
+        # Run optimization in a background thread
+        thread = threading.Thread(target=optimizer_service.run_optimization_background, args=(job_id, config.DATABASE_URL, date_str, required_inducted))
+        thread.start()
+
+        return jsonify({"message": "Optimization job started.", "job_id": job_id}), 202
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
 
 @app.route('/true-optimize-status/<job_id>', methods=['GET'])
 def get_true_optimize_status(job_id):
     """CHECKS the status of a background optimization job from the database."""
-    db = get_db()
-    job_row = db.execute('SELECT status FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
-    
-    if not job_row:
-        return jsonify({"error": "Job ID not found."}), 404
-        
-    return jsonify({"job_id": job_id, "status": job_row['status']})
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.job_id == job_id).first()
+        if not job:
+            return jsonify({"error": "Job ID not found."}), 404
+        return jsonify({"job_id": job.job_id, "status": job.status})
+    finally:
+        db.close()
 
 @app.route('/true-optimize-result/<job_id>', methods=['GET'])
 def get_true_optimize_result(job_id):
     """GETS the final result of a completed optimization job from the database."""
-    db = get_db()
-    job_row = db.execute('SELECT status, result FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.job_id == job_id).first()
 
-    if not job_row:
-        return jsonify({"error": "Job ID not found."}), 404
-        
-    if job_row['status'] != 'completed':
-        return jsonify({"error": "Job is still running or has failed."}), 202
-    
-    # The result is stored as a JSON string, so we need to parse it
-    result = json.loads(job_row['result'])
-    return jsonify(result)
+        if not job:
+            return jsonify({"error": "Job ID not found."}), 404
+
+        if job.status != 'completed':
+            return jsonify({"error": "Job is still running or has failed."}), 202
+
+        # The result is stored as a JSON string, so we need to parse it
+        result = json.loads(job.result)
+        return jsonify(result)
+    finally:
+        db.close()
 
 # --- ALL OTHER ENDPOINTS ARE STABLE AND UNCHANGED ---
 @app.route('/recommendations', methods=['GET'])
@@ -138,6 +147,7 @@ def get_recommendations():
         if not recommendations: return jsonify({"error": f"No data found for date {date_str}."}), 404
         return jsonify(recommendations)
     except Exception as e: return jsonify({"error": str(e)}), 500
+
 @app.route('/optimize', methods=['POST'])
 def optimize_schedule():
     data = request.get_json()
@@ -151,6 +161,7 @@ def optimize_schedule():
         optimized_schedule = ml_service.optimize_recommendations(initial_recommendations, constraints)
         return jsonify(optimized_schedule)
     except Exception as e: return jsonify({"error": str(e)}), 500
+
 @app.route('/what-if-on-plan', methods=['POST'])
 def what_if_on_plan():
     data = request.get_json()
@@ -162,6 +173,7 @@ def what_if_on_plan():
         result = ml_service.run_what_if_on_existing_plan(existing_plan, change_details)
         return jsonify(result)
     except Exception as e: return jsonify({"error": str(e)}), 500
+
 @app.route('/shunting-plan', methods=['POST'])
 def get_shunting_plan():
     final_schedule = request.get_json()
@@ -170,6 +182,7 @@ def get_shunting_plan():
         shunting_plan = ml_service.generate_shunting_plan(final_schedule)
         return jsonify(shunting_plan)
     except Exception as e: return jsonify({"error": str(e)}), 500
+
 @app.route('/schedule', methods=['POST'])
 def save_schedule():
     data = request.get_json()

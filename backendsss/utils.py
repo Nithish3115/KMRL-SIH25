@@ -1,11 +1,11 @@
-import sqlite3
-import config
+from database import SessionLocal
+from database_setup import Setting
 
 def get_settings():
     """Fetches all settings from the database and returns them as a dictionary."""
-    conn = sqlite3.connect(config.DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT key, value FROM settings")
-    settings = {row[0]: row[1] for row in cursor.fetchall()}
-    conn.close()
-    return settings
+    db = SessionLocal()
+    try:
+        settings = db.query(Setting).all()
+        return {setting.key: setting.value for setting in settings}
+    finally:
+        db.close()

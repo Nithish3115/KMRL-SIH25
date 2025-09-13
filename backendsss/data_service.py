@@ -1,50 +1,53 @@
+
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 import joblib
-import sqlite3
 from datetime import date, datetime
 import json
 import config
+from database import SessionLocal
+from database_setup import Schedule, OverrideLog, TrainData, BrandingContract, CleaningSchedule, DepotTrack
+from sqlalchemy.dialects.postgresql import insert
 
 class DataService:
     """
-    Handles all data operations. This final version is upgraded to load and
-    understand the depot layout for stabling geometry analysis.
+    Handles all data operations, now fully integrated with the PostgreSQL database.
     """
-    def __init__(self, file_path=config.TRAIN_DATA_PATH):
-        self.file_path = file_path
-        self.df = self.load_data()
+    def __init__(self):
+        self.df = self.load_data_from_db()
         self.label_encoders = {}
-        self.cleaning_schedule = self._load_json_data(config.CLEANING_SCHEDULE_PATH, default={"default": {}})
-        self.branding_contracts = self._load_branding_contracts()
-        self.depot_layout = self._load_json_data(config.DEPOT_LAYOUT_PATH, default={}).get('depot_layout', {})
+        self.cleaning_schedule = self._load_cleaning_schedule_from_db()
+        self.branding_contracts = self._load_branding_contracts_from_db()
+        self.depot_layout = self._load_depot_layout_from_db()
 
-    def _load_json_data(self, filename: str, default: dict) -> dict:
-        """Helper function to load any JSON file safely."""
+    def _load_cleaning_schedule_from_db(self):
+        db = SessionLocal()
         try:
-            with open(filename, 'r') as f:
-                print(f"Loading data from {filename}...")
-                return json.load(f)
-        except FileNotFoundError:
-            print(f"WARNING: '{filename}' not found.")
-            return default
+            schedules = db.query(CleaningSchedule).all()
+            return {s.date: {'available_slots': s.available_slots, 'manpower_teams': s.manpower_teams} for s in schedules}
+        finally:
+            db.close()
 
-    def _load_branding_contracts(self):
-        """Loads branding contract data and maps it by train_id."""
-        contracts_data = self._load_json_data(config.BRANDING_CONTRACTS_PATH, default={}).get("contracts", [])
-        return {contract['train_id']: contract for contract in contracts_data}
+    def _load_branding_contracts_from_db(self):
+        db = SessionLocal()
+        try:
+            contracts = db.query(BrandingContract).all()
+            return {c.train_id: {'brand_name': c.brand_name, 'monthly_quota_hours': c.monthly_quota_hours, 'penalty_per_hour_inr': c.penalty_per_hour_inr} for c in contracts}
+        finally:
+            db.close()
+
+    def _load_depot_layout_from_db(self):
+        db = SessionLocal()
+        try:
+            tracks = db.query(DepotTrack).all()
+            return {t.track_name: {'position': t.position, 'accessibility_score': t.accessibility_score, 'has_maintenance_access': t.has_maintenance_access, 'description': t.description, 'status': t.status} for t in tracks}
+        finally:
+            db.close()
 
     def get_track_properties(self, track_name: str) -> dict:
-        """
-        NEW & CRITICAL: Retrieves the properties (accessibility, status, etc.) 
-        for a specific track from the loaded depot layout data.
-        """
         return self.depot_layout.get(track_name, {"accessibility_score": 0, "has_maintenance_access": False, "status": "Unknown"})
-    
-    def _get_db_connection(self):
-        return sqlite3.connect(config.DB_FILE)
 
     def get_cleaning_resources_for_date(self, date_str: str) -> dict:
         return self.cleaning_schedule.get(date_str, self.cleaning_schedule.get("default", {}))
@@ -67,14 +70,17 @@ class DataService:
     def get_fleet_average_mileage(self, daily_data: pd.DataFrame) -> float:
         return daily_data['mileage_km'].mean() if not daily_data.empty else 0
 
-    def load_data(self):
+    def load_data_from_db(self):
+        db = SessionLocal()
         try:
-            df = pd.read_csv(self.file_path)
-            df['date'] = pd.to_datetime(df['date'])
+            query = db.query(TrainData).statement
+            df = pd.read_sql(query, db.bind)
             return df
-        except FileNotFoundError: 
-            print(f"Warning: Data file not found at {self.file_path}")
+        except Exception as e:
+            print(f"Could not load train data from database: {e}")
             return None
+        finally:
+            db.close()
 
     def preprocess_for_training(self):
         if self.df is None: return None, None, None, None
@@ -83,7 +89,6 @@ class DataService:
         
         for col in categorical_cols:
             le = LabelEncoder()
-            # Add 'unknown' to the list of classes to handle unseen values gracefully
             all_classes = np.append(df[col].astype(str).unique(), 'unknown')
             le.fit(all_classes)
             df[col] = le.transform(df[col].astype(str))
@@ -110,8 +115,6 @@ class DataService:
         for col in categorical_cols:
             le = self.label_encoders.get(col)
             if le:
-                # This robust strategy handles unseen values by mapping them to the 'unknown' category
-                # that the model was trained on, preventing prediction errors.
                 df[col] = df[col].astype(str).apply(lambda s: s if s in le.classes_ else 'unknown')
                 df[col] = le.transform(df[col])
         features = ['mileage_km', 'rolling_stock_cert_days_remaining', 'signalling_cert_days_remaining', 'telecom_cert_days_remaining', 'job_card_status', 'branding_priority', 'cleaning_status', 'stabling_location', 'total_cert_days', 'certs_critical', 'weekday']
@@ -124,22 +127,37 @@ class DataService:
         return daily_data.reset_index(drop=True) if not daily_data.empty else None
 
     def save_final_schedule(self, schedule_date: date, final_schedule: list, original_predictions: dict):
-        conn = self._get_db_connection()
-        cursor = conn.cursor()
-        date_str = schedule_date.strftime('%Y-%m-%d')
-        for train in final_schedule:
-            train_id = train['train_id']
-            final_decision = train['final_decision']
-            cursor.execute('INSERT INTO schedules (schedule_date, train_id, final_decision) VALUES (?, ?, ?) ON CONFLICT(schedule_date, train_id) DO UPDATE SET final_decision=excluded.final_decision', (date_str, train_id, final_decision))
-            ai_prediction = original_predictions.get(train_id)
-            if ai_prediction and ai_prediction != final_decision:
-                cursor.execute('INSERT INTO override_log (log_date, train_id, ai_prediction, supervisor_decision) VALUES (?, ?, ?, ?)', (date_str, train_id, ai_prediction, final_decision))
-        conn.commit()
-        conn.close()
+        db = SessionLocal()
+        try:
+            date_str = schedule_date.strftime('%Y-%m-%d')
+            for train in final_schedule:
+                train_id = train['train_id']
+                final_decision = train['final_decision']
+                
+                stmt = insert(Schedule).values(schedule_date=date_str, train_id=train_id, final_decision=final_decision)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=['schedule_date', 'train_id'],
+                    set_=dict(final_decision=stmt.excluded.final_decision)
+                )
+                db.execute(stmt)
+
+                ai_prediction = original_predictions.get(train_id)
+                if ai_prediction and ai_prediction != final_decision:
+                    override = OverrideLog(log_date=date_str, train_id=train_id, ai_prediction=ai_prediction, supervisor_decision=final_decision)
+                    db.add(override)
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            db.close()
 
     def get_historical_approved_data(self):
-        conn = self._get_db_connection()
-        df = pd.read_sql_query("SELECT schedule_date as date, train_id, final_decision as induction_decision FROM schedules", conn)
-        conn.close()
-        df['date'] = pd.to_datetime(df['date'])
-        return df
+        db = SessionLocal()
+        try:
+            query = db.query(Schedule.schedule_date.label('date'), Schedule.train_id, Schedule.final_decision.label('induction_decision')).statement
+            df = pd.read_sql(query, db.bind)
+            df['date'] = pd.to_datetime(df['date'])
+            return df
+        finally:
+            db.close()

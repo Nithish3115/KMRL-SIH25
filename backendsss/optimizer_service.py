@@ -1,12 +1,14 @@
+
 import random
 import json
-import sqlite3
 import time
 from deap import base, creator, tools, algorithms
 import numpy as np
 import pandas as pd
 import config
 from utils import get_settings
+from database import SessionLocal
+from database_setup import Job
 
 # This service needs access to the ML service to calculate the quality of a plan
 from ml_service import TrainInductionModel
@@ -39,14 +41,13 @@ class GeneticOptimizer:
                 kpis['financial_score'] * self.weights[1] + 
                 kpis['balance_score'] * self.weights[2]),
 
-    def run_optimization_background(self, job_id: str, db_file: str, date_str: str, required_inducted: int):
+    def run_optimization_background(self, job_id: str, db_url: str, date_str: str, required_inducted: int):
         """
         The main function that runs the GA. It's designed to be called by a
         background thread and to update the job status in the database upon completion.
         """
         print(f"\n--- [Job ID: {job_id}] Starting background GA for {date_str} ---")
-        conn = sqlite3.connect(db_file)
-        cursor = conn.cursor()
+        db = SessionLocal()
 
         try:
             daily_data = self.ml_service.get_recommendations(date_str)
@@ -104,7 +105,6 @@ class GeneticOptimizer:
             decision_map = {0: 'Maintenance', 1: 'Standby', 2: 'Inducted'}
             for i, train in enumerate(final_plan):
                 train['final_decision'] = decision_map[best_individual[i]]
-                # Convert Timestamp objects to strings
                 if 'date' in train and isinstance(train['date'], pd.Timestamp):
                     train['date'] = train['date'].strftime('%Y-%m-%d')
 
@@ -119,16 +119,21 @@ class GeneticOptimizer:
                 }
             }
             
-            # Store result as a JSON string
             result_str = json.dumps(result)
-            cursor.execute("UPDATE jobs SET status = ?, result = ?, updated_at = CURRENT_TIMESTAMP WHERE job_id = ?", ('completed', result_str, job_id))
-            conn.commit()
+            job = db.query(Job).filter(Job.job_id == job_id).first()
+            if job:
+                job.status = 'completed'
+                job.result = result_str
+                db.commit()
             print(f"--- [Job ID: {job_id}] Background GA finished successfully. ---")
 
         except Exception as e:
             print(f"--- [Job ID: {job_id}] Background GA failed: {e}")
             error_result = json.dumps({"error": str(e)})
-            cursor.execute("UPDATE jobs SET status = ?, result = ?, updated_at = CURRENT_TIMESTAMP WHERE job_id = ?", ('failed', error_result, job_id))
-            conn.commit()
+            job = db.query(Job).filter(Job.job_id == job_id).first()
+            if job:
+                job.status = 'failed'
+                job.result = error_result
+                db.commit()
         finally:
-            conn.close()
+            db.close()

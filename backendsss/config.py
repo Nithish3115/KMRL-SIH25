@@ -1,7 +1,7 @@
 # --- Configuration File ---
 
 # --- Database Configuration ---
-DB_FILE = 'kmrl_schedule.db'
+DATABASE_URL = 'postgresql://postgres.dslunxuwpcxeohxiccqk:laAWqTQv3nRzhnMy@aws-1-ap-south-1.pooler.supabase.com:5432/postgres'
 
 # --- Model and Data Paths ---
 MODEL_PATH = 'model.xgb'
