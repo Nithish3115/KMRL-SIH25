@@ -1,0 +1,19 @@
+{
+    "2025-09-12": {
+      "available_slots": 2,
+      "manpower_teams": 1
+    },
+    "2025-09-13": {
+      "available_slots": 3,
+      "manpower_teams": 2
+    },
+    "2025-09-14": {
+      "available_slots": 1,
+      "manpower_teams": 1
+    },
+    "default": {
+      "available_slots": 2,
+      "manpower_teams": 2
+    }
+  }
+  

@@ -1,0 +1,29 @@
+{
+    "contracts": [
+      {
+        "train_id": 5,
+        "brand_name": "Lulu Digital",
+        "monthly_quota_hours": 200,
+        "penalty_per_hour_inr": 5000
+      },
+      {
+        "train_id": 12,
+        "brand_name": "MyG Electronics",
+        "monthly_quota_hours": 220,
+        "penalty_per_hour_inr": 6500
+      },
+      {
+        "train_id": 18,
+        "brand_name": "V-Guard",
+        "monthly_quota_hours": 180,
+        "penalty_per_hour_inr": 4000
+      },
+      {
+        "train_id": 22,
+        "brand_name": "Federal Bank",
+        "monthly_quota_hours": 250,
+        "penalty_per_hour_inr": 8000
+      }
+    ]
+  }
+  

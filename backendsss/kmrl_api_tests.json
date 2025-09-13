@@ -1,0 +1,113 @@
+{
+    "client": "Thunder Client",
+    "collectionName": "KMRL Backend API",
+    "dateExported": "2025-09-12T10:00:00.000Z",
+    "version": "1.1",
+    "folders": [
+      {
+        "_id": "1-daily-workflow",
+        "name": "1. Daily Supervisor Workflow",
+        "containerId": "",
+        "created": "2025-09-12T10:00:00.000Z"
+      },
+      {
+        "_id": "2-what-if-analysis",
+        "name": "2. What-If Scenario Analysis",
+        "containerId": "",
+        "created": "2025-09-12T10:00:00.000Z"
+      }
+    ],
+    "requests": [
+      {
+        "_id": "get-recommendations",
+        "colId": "main-collection-id",
+        "containerId": "1-daily-workflow",
+        "name": "GET Daily Recommendations",
+        "url": "http://127.0.0.1:5000/recommendations",
+        "method": "GET",
+        "sortNum": 10,
+        "created": "2025-09-12T10:00:00.000Z",
+        "modified": "2025-09-12T10:00:00.000Z",
+        "headers": [],
+        "params": [],
+        "tests": []
+      },
+      {
+        "_id": "post-optimize",
+        "colId": "main-collection-id",
+        "containerId": "1-daily-workflow",
+        "name": "POST Optimize Schedule",
+        "url": "http://127.0.0.1:5000/optimize",
+        "method": "POST",
+        "sortNum": 20,
+        "created": "2025-09-12T10:00:00.000Z",
+        "modified": "2025-09-12T10:00:00.000Z",
+        "headers": [],
+        "params": [],
+        "body": {
+          "type": "json",
+          "raw": "{\n  \"date\": \"2025-09-12\",\n  \"constraints\": {\n    \"required_inducted\": 18,\n    \"required_maintenance\": 3\n  }\n}",
+          "form": []
+        },
+        "tests": []
+      },
+      {
+        "_id": "post-save-schedule",
+        "colId": "main-collection-id",
+        "containerId": "1-daily-workflow",
+        "name": "POST Save Final Schedule",
+        "url": "http://127.0.0.1:5000/schedule",
+        "method": "POST",
+        "sortNum": 30,
+        "created": "2025-09-12T10:00:00.000Z",
+        "modified": "2025-09-12T10:00:00.000Z",
+        "headers": [],
+        "params": [],
+        "body": {
+          "type": "json",
+          "raw": "{\n  \"date\": \"2025-09-12\",\n  \"schedule\": [\n    { \"train_id\": 12, \"final_decision\": \"Inducted\" },\n    { \"train_id\": 18, \"final_decision\": \"Standby\" }, \n    { \"train_id\": 5, \"final_decision\": \"Inducted\" }\n  ]\n}",
+          "form": []
+        },
+        "tests": []
+      },
+      {
+        "_id": "whatif-financial",
+        "colId": "main-collection-id",
+        "containerId": "2-what-if-analysis",
+        "name": "WHAT-IF: Financial Impact",
+        "url": "http://127.0.0.1:5000/scenario-analysis",
+        "method": "POST",
+        "sortNum": 10,
+        "created": "2025-09-12T10:00:00.000Z",
+        "modified": "2025-09-12T10:00:00.000Z",
+        "headers": [],
+        "params": [],
+        "body": {
+          "type": "json",
+          "raw": "{\n  \"train_id\": 18,\n  \"date\": \"2025-09-12\",\n  \"action\": \"force_maintenance\"\n}",
+          "form": []
+        },
+        "tests": []
+      },
+      {
+        "_id": "whatif-operational",
+        "colId": "main-collection-id",
+        "containerId": "2-what-if-analysis",
+        "name": "WHAT-IF: Operational Risk",
+        "url": "http://127.0.0.1:5000/scenario-analysis",
+        "method": "POST",
+        "sortNum": 20,
+        "created": "2025-09-12T10:00:00.000Z",
+        "modified": "2025-09-12T10:00:00.000Z",
+        "headers": [],
+        "params": [],
+        "body": {
+          "type": "json",
+          "raw": "{\n  \"train_id\": 9,\n  \"date\": \"2025-09-12\",\n  \"action\": \"force_induct\"\n}",
+          "form": []
+        },
+        "tests": []
+      }
+    ]
+  }
+  
